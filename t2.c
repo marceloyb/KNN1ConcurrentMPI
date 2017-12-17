@@ -1,8 +1,24 @@
-#include<mpi.h>
-#include<stdio.h>
-#include<stdlib.h>
-#include <string.h>
+#include <mpi.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
+#include <string.h>
+
+#define MANAGER 0
+#define TAG_ASK_FOR_NUMBER 1
+#define TAG_SEND_NUMBER 2
+#define TAG_SEND_ANSWER 3
+MPI_Datatype MPI_answer, MPI_task;
+
+typedef struct task{
+  int k;
+  int valid;
+}task;
+
+typedef struct answer{
+  int linha;
+  float min;
+}answer;
 
 char buffer[50];
 
@@ -22,19 +38,32 @@ char *get_rec(FILE *file){
   return buffer;
 }
 
+int main (int argc, char*argv[]){
+  int id, i, j, k, nproc, procdest, idcomm, controlelinha = 0;
+  MPI_Init(&argc, &argv);
+  int lengthsa[2], lengthst[2];
+  MPI_Datatype typesa[2], typest[2];
+  MPI_Aint desloca[2], desloct[2];
+  lengthsa[0] = 1; lengthst[0] = 1;
+  lengthsa[1] = 1; lengthst[1] = 1;
+  desloca[0] = offsetof (answer, linha); desloct[0] = offsetof (task, k);
+  desloca[1] = offsetof (answer, min); desloct[1] = offsetof (task, valid);
+  typesa[0] = MPI_INT; typest[0] = MPI_INT;
+  typesa[1] = MPI_FLOAT; typest[1] = MPI_INT;
+  MPI_Type_create_struct(2, lengthsa, desloca, typesa, &MPI_answer);
+  MPI_Type_commit(&MPI_answer);
+  MPI_Type_create_struct(2, lengthst, desloct, typest, &MPI_task);
+  MPI_Type_commit(&MPI_task);
+  MPI_Comm_rank(MPI_COMM_WORLD, &id);
+  MPI_Comm_size(MPI_COMM_WORLD, &nproc);
+  MPI_Status st;
 
-int main (int argc, char *argv[]){
-  // declarações
+
   int linhadamatrizteste = 0;
   int linhatesteatual;
   int natributos, nlinhasbase = 6746, nlinhasteste = 2248;
   float min;
   float distanciaMinima;
-  int i, j, k, id, nproc, procdest;
-  MPI_Init(&argc, &argv);
-	MPI_Comm_rank(MPI_COMM_WORLD, &id);
-  MPI_Comm_size(MPI_COMM_WORLD, &nproc);
-  MPI_Status st;
   float atributoi;
   char *atributo = malloc(sizeof(char)*50);
   char *nomearquivobase = (char*)malloc(20 * sizeof(char));
@@ -46,8 +75,13 @@ int main (int argc, char *argv[]){
   natributos = atoi(argv[3]);
   float matrizbase[nlinhasbase][natributos], matrizteste[nlinhasteste][natributos];
 
-  // processo root
+  // processo gerente
   if (id == 0){
+    int sender, *finished, tag;
+    task t;
+    answer ans;
+    finished = (int*)calloc(nproc,sizeof(int));
+    // le os arquivos e passa para a memoria
     ARQUIVOBASE = fopen(nomearquivobase, "r");
     ARQUIVOTESTE = fopen(nomearquivoteste, "r");
     for (i = 0; i < nlinhasbase; i++){
@@ -65,65 +99,80 @@ int main (int argc, char *argv[]){
       }
     }
 
-
     for (procdest = 1; procdest < nproc; procdest++){
       MPI_Send(&matrizbase, natributos*nlinhasbase, MPI_FLOAT, procdest, 1, MPI_COMM_WORLD);
       MPI_Send(&matrizteste, natributos*nlinhasteste, MPI_FLOAT, procdest, 1, MPI_COMM_WORLD);
     }
 
-    do{
-      for (i = 1; i <= nproc-1; i++){
-        k = linhadamatrizteste + i - 1;
-        if (k > nlinhasteste){
-          break;
-        }
-        MPI_Send(&k, 1, MPI_INT, i, 3, MPI_COMM_WORLD);
-      }
-
-      if (linhadamatrizteste >= nlinhasteste){
-        break;
-      }
-
-      for(i = 1; i <= nproc-1; i++){
-        MPI_Recv(&distanciaMinima, 1, MPI_FLOAT, i, 2, MPI_COMM_WORLD, &st);
-        MPI_Recv(&linhatesteatual, 1, MPI_INT, i, 2, MPI_COMM_WORLD, &st);
-        printf ("\nlinha %i: %f", linhatesteatual, distanciaMinima);
+    while(controlelinha < nlinhasteste){
+      MPI_Recv(&ans, 1, MPI_answer, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &st);
+      sender = st.MPI_SOURCE;
+      tag = st.MPI_TAG;
+      if (tag == TAG_ASK_FOR_NUMBER){
+        t.k = linhadamatrizteste;
         linhadamatrizteste++;
-        if (linhatesteatual+1 >= nlinhasteste){
-          break;
+        if (t.k < nlinhasteste){
+          t.valid = 1;
+          MPI_Send(&t, 1, MPI_task, sender, TAG_SEND_NUMBER, MPI_COMM_WORLD);
+        }
+        else{
+          t.valid = 0;
+          finished[sender] = 1;
+          MPI_Send(&t, 1, MPI_task, sender, TAG_SEND_NUMBER, MPI_COMM_WORLD);
         }
       }
-    } while(linhadamatrizteste < nlinhasteste);
+      else if(tag == TAG_SEND_ANSWER){
+        printf ("\nlinha %i: %f", ans.linha, ans.min);
+        controlelinha++;
+      }
+    }
+    int num_finished;
+    finished[0] = 1;
+    for (i = 0; i < nproc; i++){
+      num_finished += finished[i];
+    }
+    while (num_finished < nproc){
+      MPI_Recv(&ans, 1, MPI_answer, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &st);
+      t.valid = 0;
+      sender = st.MPI_SOURCE;
+      MPI_Send(&t, 1, MPI_task, sender, TAG_SEND_NUMBER, MPI_COMM_WORLD);
+      num_finished++;
+    }
   }
 
+  // processos trabalhadores
   else{
+    answer a;
+    task t;
     float soma, minlinha;
     MPI_Recv(&matrizbase, natributos*nlinhasbase, MPI_FLOAT, 0, 1, MPI_COMM_WORLD, &st);
     MPI_Recv(&matrizteste, natributos*nlinhasteste, MPI_FLOAT, 0, 1, MPI_COMM_WORLD, &st);
-
-    do{
-      MPI_Recv(&k, 1, MPI_INT, 0, 3, MPI_COMM_WORLD, &st);
+    while(1){
       min = 999999;
-      if (k > nlinhasteste){
+      MPI_Send(&a, 1, MPI_answer, MANAGER, TAG_ASK_FOR_NUMBER, MPI_COMM_WORLD);
+      MPI_Recv(&t, 1, MPI_task, MANAGER, TAG_SEND_NUMBER, MPI_COMM_WORLD, &st);
+
+      if (!t.valid){
         break;
       }
+
       for (i = 0; i < nlinhasbase; i ++){
         soma = 0;
         for (j = 0; j < natributos; j++){
-          soma = soma + powf((matrizteste[k][j] - matrizbase[i][j]), 2);
+          soma = soma + powf((matrizteste[t.k][j] - matrizbase[i][j]), 2);
         }
         soma = sqrtf(soma);
         if (soma < min){
           min = soma;
         }
       }
-      MPI_Send(&min, 1, MPI_FLOAT, 0, 2, MPI_COMM_WORLD);
-      MPI_Send(&k, 1, MPI_FLOAT, 0, 2, MPI_COMM_WORLD);
-      if (k + nproc > nlinhasteste){
-        break;
-      }
-    }while (k < nlinhasteste);
-
+      a.min = min;
+      a.linha = t.k;
+      MPI_Send(&a, 1, MPI_answer, MANAGER, TAG_SEND_ANSWER, MPI_COMM_WORLD);
+    }
   }
+
+  MPI_Type_free(&MPI_task);
+  MPI_Type_free(&MPI_answer);
   MPI_Finalize();
 }
