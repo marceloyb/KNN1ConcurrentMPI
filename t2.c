@@ -77,10 +77,16 @@ int main (int argc, char*argv[]){
 
   // processo gerente
   if (id == 0){
-    int sender, *finished, tag;
+    int sender, finished[nproc], tag;
     task t;
     answer ans;
-    finished = (int*)calloc(nproc,sizeof(int));
+    for (i = 0; i < nproc; i++){
+      finished[i] = 0;
+    }
+
+    for (i = 0; i < nproc; i++){
+      printf ("%i ", finished[i]);
+    }
     // le os arquivos e passa para a memoria
     ARQUIVOBASE = fopen(nomearquivobase, "r");
     ARQUIVOTESTE = fopen(nomearquivoteste, "r");
@@ -99,19 +105,23 @@ int main (int argc, char*argv[]){
       }
     }
 
+    free(ARQUIVOBASE);
+    free(ARQUIVOTESTE);
+
     for (procdest = 1; procdest < nproc; procdest++){
       MPI_Send(&matrizbase, natributos*nlinhasbase, MPI_FLOAT, procdest, 1, MPI_COMM_WORLD);
       MPI_Send(&matrizteste, natributos*nlinhasteste, MPI_FLOAT, procdest, 1, MPI_COMM_WORLD);
     }
 
+    // calculo distancia minima
     while(controlelinha < nlinhasteste){
       MPI_Recv(&ans, 1, MPI_answer, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &st);
       sender = st.MPI_SOURCE;
       tag = st.MPI_TAG;
       if (tag == TAG_ASK_FOR_NUMBER){
-        t.k = linhadamatrizteste;
-        linhadamatrizteste++;
-        if (t.k < nlinhasteste){
+        if (linhadamatrizteste < nlinhasteste){
+          t.k = linhadamatrizteste;
+          linhadamatrizteste++;
           t.valid = 1;
           MPI_Send(&t, 1, MPI_task, sender, TAG_SEND_NUMBER, MPI_COMM_WORLD);
         }
@@ -122,15 +132,20 @@ int main (int argc, char*argv[]){
         }
       }
       else if(tag == TAG_SEND_ANSWER){
-        printf ("\nlinha %i: %f", ans.linha, ans.min);
+        printf ("\nsender %i linha %i: %f",sender, ans.linha, ans.min);
+        if (ans.linha >= nlinhasteste){
+          finished[sender] = 1;
+        }
         controlelinha++;
       }
     }
-    int num_finished;
+    int num_finished = 0;
     finished[0] = 1;
     for (i = 0; i < nproc; i++){
+      printf ("%i ", finished[i]);
       num_finished += finished[i];
     }
+    printf ("%i", num_finished);
     while (num_finished < nproc){
       MPI_Recv(&ans, 1, MPI_answer, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &st);
       t.valid = 0;
@@ -171,7 +186,7 @@ int main (int argc, char*argv[]){
       MPI_Send(&a, 1, MPI_answer, MANAGER, TAG_SEND_ANSWER, MPI_COMM_WORLD);
     }
   }
-
+  printf ("\nprocesso %i encerrou\n", id);
   MPI_Type_free(&MPI_task);
   MPI_Type_free(&MPI_answer);
   MPI_Finalize();
