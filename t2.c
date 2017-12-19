@@ -8,6 +8,7 @@
 #define TAG_ASK_FOR_NUMBER 1
 #define TAG_SEND_NUMBER 2
 #define TAG_SEND_ANSWER 3
+#define MATRIX_INDEX(i,j,m)(i*m+j)
 MPI_Datatype MPI_answer, MPI_task;
 
 typedef struct task{
@@ -20,7 +21,16 @@ typedef struct answer{
   float min;
 }answer;
 
+int natributos, nlinhasbase = 6746, nlinhasteste = 2248;
+float *matrizbase;
+float *matrizteste;
 char buffer[50];
+
+void alocamatriz(){
+  int i,j;
+  matrizbase = (float*)malloc(nlinhasbase*natributos * sizeof(float*));
+  matrizteste = (float*)malloc(nlinhasteste*natributos * sizeof(float*));
+}
 
 char *get_rec(FILE *file){
 	int i = 0, j;
@@ -61,7 +71,6 @@ int main (int argc, char*argv[]){
 
   int linhadamatrizteste = 0;
   int linhatesteatual;
-  int natributos, nlinhasbase = 6746, nlinhasteste = 2248;
   float min;
   float distanciaMinima;
   float atributoi;
@@ -73,9 +82,10 @@ int main (int argc, char*argv[]){
   nomearquivobase = argv[1];
   nomearquivoteste = argv[2];
   natributos = atoi(argv[3]);
-  float matrizbase[nlinhasbase][natributos], matrizteste[nlinhasteste][natributos];
+  alocamatriz();
 
-  // processo gerente
+
+  //processo gerente
   if (id == 0){
     int sender, finished[nproc], tag;
     task t;
@@ -94,23 +104,20 @@ int main (int argc, char*argv[]){
       for (j = 0; j < natributos; j++){
         atributo = get_rec(ARQUIVOBASE);
         atributoi = atof(atributo);
-        matrizbase[i][j] = atributoi;
+        matrizbase[MATRIX_INDEX(i,j,natributos)] = atributoi;
       }
     }
     for (i = 0; i < nlinhasteste; i++){
       for (j = 0; j < natributos; j++){
         atributo = get_rec(ARQUIVOTESTE);
         atributoi = atof(atributo);
-        matrizteste[i][j] = atributoi;
+        matrizteste[MATRIX_INDEX(i,j,natributos)] = atributoi;
       }
     }
 
-    free(ARQUIVOBASE);
-    free(ARQUIVOTESTE);
-
     for (procdest = 1; procdest < nproc; procdest++){
-      MPI_Send(&matrizbase, natributos*nlinhasbase, MPI_FLOAT, procdest, 1, MPI_COMM_WORLD);
-      MPI_Send(&matrizteste, natributos*nlinhasteste, MPI_FLOAT, procdest, 1, MPI_COMM_WORLD);
+      MPI_Send(matrizbase, natributos*nlinhasbase, MPI_FLOAT, procdest, 1, MPI_COMM_WORLD);
+      MPI_Send(matrizteste, natributos*nlinhasteste, MPI_FLOAT, procdest, 1, MPI_COMM_WORLD);
     }
 
     // calculo distancia minima
@@ -132,7 +139,7 @@ int main (int argc, char*argv[]){
         }
       }
       else if(tag == TAG_SEND_ANSWER){
-        printf ("\nsender %i linha %i: %f",sender, ans.linha, ans.min);
+        printf ("sender %i linha %i: %f\n",sender, ans.linha, ans.min);
         if (ans.linha >= nlinhasteste){
           finished[sender] = 1;
         }
@@ -158,13 +165,12 @@ int main (int argc, char*argv[]){
     answer a;
     task t;
     float soma, minlinha;
-    MPI_Recv(&matrizbase, natributos*nlinhasbase, MPI_FLOAT, 0, 1, MPI_COMM_WORLD, &st);
-    MPI_Recv(&matrizteste, natributos*nlinhasteste, MPI_FLOAT, 0, 1, MPI_COMM_WORLD, &st);
+    MPI_Recv(matrizbase, natributos*nlinhasbase, MPI_FLOAT, 0, 1, MPI_COMM_WORLD, &st);
+    MPI_Recv(matrizteste, natributos*nlinhasteste, MPI_FLOAT, 0, 1, MPI_COMM_WORLD, &st);
     while(1){
       min = 999999;
       MPI_Send(&a, 1, MPI_answer, MANAGER, TAG_ASK_FOR_NUMBER, MPI_COMM_WORLD);
       MPI_Recv(&t, 1, MPI_task, MANAGER, TAG_SEND_NUMBER, MPI_COMM_WORLD, &st);
-
       if (!t.valid){
         break;
       }
@@ -172,7 +178,7 @@ int main (int argc, char*argv[]){
       for (i = 0; i < nlinhasbase; i ++){
         soma = 0;
         for (j = 0; j < natributos; j++){
-          soma = soma + powf((matrizteste[t.k][j] - matrizbase[i][j]), 2);
+          soma = soma + powf((matrizteste[MATRIX_INDEX(t.k,j,natributos)] - matrizbase[MATRIX_INDEX(i,j,natributos)]), 2);
         }
         soma = sqrtf(soma);
         if (soma < min){
