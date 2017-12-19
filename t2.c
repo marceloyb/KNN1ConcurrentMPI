@@ -142,10 +142,8 @@ int main (int argc, char*argv[]){
     int num_finished = 0;
     finished[0] = 1;
     for (i = 0; i < nproc; i++){
-      printf ("%i ", finished[i]);
       num_finished += finished[i];
     }
-    printf ("%i", num_finished);
     while (num_finished < nproc){
       MPI_Recv(&ans, 1, MPI_answer, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &st);
       t.valid = 0;
@@ -186,7 +184,6 @@ int main (int argc, char*argv[]){
       MPI_Send(&a, 1, MPI_answer, MANAGER, TAG_SEND_ANSWER, MPI_COMM_WORLD);
     }
   }
-  printf ("\nprocesso %i encerrou\n", id);
   MPI_Type_free(&MPI_task);
   MPI_Type_free(&MPI_answer);
   MPI_Finalize();
